@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,7 @@ type ChainReconciler struct {
 	Log                       logr.Logger
 	Scheme                    *runtime.Scheme
 	Threads                   int
+	AllowWhenNoChains         bool
 	AuthserviceDeploymentName string
 }
 
@@ -46,6 +48,8 @@ type ChainReconciler struct {
 func (r *ChainReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
 	logger := r.Log.WithValues("chain", req.NamespacedName)
+	var update bool
+	var configMap *corev1.ConfigMap
 
 	chains, err := getAllChains(r, logger, req.NamespacedName.Namespace)
 	if err != nil {
@@ -53,9 +57,12 @@ func (r *ChainReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Generate the ConfigMap based on the configuration and the chains.
-	configMap, update := createConfigMap(r, req.NamespacedName.Namespace, r.Threads, chains)
-
+	if len(chains.Items) == 0 {
+		configMap, update = createEmptyConfigMap(r, req.NamespacedName.Namespace, r.Threads, r.AllowWhenNoChains)
+	} else {
+		// Generate the ConfigMap based on the configuration and the chains.
+		configMap, update = createConfigMap(r, req.NamespacedName.Namespace, r.Threads, chains)
+	}
 	// Create/Update the existing ConfigMap if it exists with the new JSON file.
 	if update {
 		if err := r.Update(ctx, configMap); err != nil {
@@ -69,6 +76,8 @@ func (r *ChainReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 	}
 
+	// FIXME: we should tag the RequestAuthentication objects created by us with
+	// a label so that we could remove them when the Chains are deleted.
 	for _, chain := range chains.Items {
 		if err := createRequestAuthentication(r, logger, &chain); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)

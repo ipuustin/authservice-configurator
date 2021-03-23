@@ -63,9 +63,15 @@ type JSONOidc struct {
 	AccessToken                 *JSONToken `json:"access_token,omitempty"`
 }
 
+// JSONSimple is part of the ConfigMap data.
+type JSONSimple struct {
+	Allow *bool `json:"allow"`
+}
+
 // JSONFilter is part of the ConfigMap data.
 type JSONFilter struct {
-	Oidc *JSONOidc `json:"oidc,omitempty"`
+	Oidc   *JSONOidc   `json:"oidc,omitempty"`
+	Simple *JSONSimple `json:"simple,omitempty"`
 }
 
 // JSONChain is part of the ConfigMap data.
@@ -133,6 +139,65 @@ func createAuthserviceConfiguration(threads int, chains *authcontroller.ChainLis
 	}
 
 	return &configData
+}
+
+func createSimpleAuthserviceConfiguration(threads int, allow bool) *JSONConfigData {
+	configData := JSONConfigData{
+		ListenAddress: "0.0.0.0",
+		ListenPort:    "10003",
+		LogLevel:      "trace",
+		Threads:       threads,
+		Chains:        make([]*JSONChain, 1),
+	}
+
+	configData.Chains[0] = &JSONChain{
+		Name: "simple-chain",
+		Filters: []JSONFilter{
+			{
+				Simple: &JSONSimple{
+					Allow: &allow,
+				},
+			},
+		},
+	}
+	configData.Chains[0].Match = nil
+
+	return &configData
+}
+
+func createEmptyConfigMap(client client.Client, namespace string, threads int, allow bool) (*corev1.ConfigMap, bool) {
+	var configMap corev1.ConfigMap
+	ctx := context.Background()
+	update := true
+
+	// Create the ConfigMap to the same namespace where the related chains are. This is for limiting
+	// the configuration of AuthService from resources in unrelated namespaces. See
+	// https://kubernetes.io/docs/tasks/administer-cluster/securing-a-cluster/#api-authorization
+
+	configMapName := types.NamespacedName{
+		Namespace: namespace,
+		Name:      "authservice-configmap",
+	}
+
+	if err := client.Get(ctx, configMapName, &configMap); err != nil {
+		// not found, create a new configmap
+		update = false
+
+		configMap = corev1.ConfigMap{}
+		configMap.ObjectMeta.Namespace = namespace
+		configMap.ObjectMeta.Name = "authservice-configmap"
+	}
+
+	jsonData := createSimpleAuthserviceConfiguration(threads, allow)
+	bytes, err := json.Marshal(jsonData)
+	if err != nil {
+		return nil, false
+	}
+
+	configMap.Data = make(map[string]string, 1)
+	configMap.Data["config.json"] = string(bytes)
+
+	return &configMap, update
 }
 
 func createConfigMap(client client.Client, namespace string, threads int, chains *authcontroller.ChainList) (*corev1.ConfigMap, bool) {

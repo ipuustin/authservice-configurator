@@ -52,9 +52,11 @@ func main() {
 	var metricsAddr string
 	var authserviceDeploymentName string
 	var enableLeaderElection bool
+	var allowWhenNoChains bool
 	var threads int
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&authserviceDeploymentName, "authservice-deployment", "authservice", "The name of AuthService deployment to be restarted after configuration change.")
+	flag.BoolVar(&allowWhenNoChains, "allow-when-no-chains", false, "Allow incoming requests when there are no chains configured.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -86,6 +88,7 @@ func main() {
 		Scheme:                    mgr.GetScheme(),
 		Threads:                   threads,
 		AuthserviceDeploymentName: authserviceDeploymentName,
+		AllowWhenNoChains:         allowWhenNoChains,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Chain")
 		os.Exit(1)
